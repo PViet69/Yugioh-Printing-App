@@ -1,0 +1,13 @@
+services:
+  yugioh-printing:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yugioh-printing:latest
+    container_name: yugioh-printing
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
