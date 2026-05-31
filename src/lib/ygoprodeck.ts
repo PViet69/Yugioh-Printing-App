@@ -2,7 +2,7 @@ import type { CardInstance, DeckResolution, DeckSection, ParsedYdkeDeck, Resolve
 
 const API_BASE_URL = "https://db.ygoprodeck.com/api/v7/cardinfo.php";
 const CARD_REVALIDATE_SECONDS = 60 * 60 * 24 * 7;
-const MAX_CONCURRENT_REQUESTS = 4;
+const MAX_CONCURRENT_REQUESTS = 6;
 
 type YgoproDeckCardImage = {
   id: number;
@@ -33,8 +33,17 @@ export class CardResolutionError extends Error {
 export async function resolveCards(ids: string[]): Promise<Map<string, ResolvedCard>> {
   const uniqueIds = [...new Set(ids)];
   const entries = await mapWithConcurrency(uniqueIds, MAX_CONCURRENT_REQUESTS, async (id) => {
-    const card = await fetchCardById(id);
-    return [id, card] as const;
+    try {
+      const card = await fetchCardById(id);
+      return [id, card] as const;
+    } catch (error) {
+      console.warn(
+        error instanceof Error
+          ? `Skipping card ${id}: ${error.message}`
+          : `Skipping card ${id}: unknown YGOPRODeck error`,
+      );
+      return [id, undefined] as const;
+    }
   });
 
   return new Map(entries.filter((entry): entry is readonly [string, ResolvedCard] => Boolean(entry[1])));
@@ -60,6 +69,8 @@ export async function resolveDeck(parsed: ParsedYdkeDeck): Promise<DeckResolutio
     },
   };
 }
+
+export { mapWithConcurrency };
 
 export async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string }> {
   const response = await fetch(url, {
@@ -128,6 +139,7 @@ async function fetchCardById(id: string): Promise<ResolvedCard | undefined> {
     imageUrl: image.image_url,
     imageUrlSmall: image.image_url_small,
     imageUrlCropped: image.image_url_cropped,
+    source: "ygoprodeck",
   };
 }
 

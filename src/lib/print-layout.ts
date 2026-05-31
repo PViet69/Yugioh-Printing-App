@@ -12,8 +12,8 @@ export const PRINT_LAYOUT = {
   columns: 3,
   rows: 3,
   cardsPerPage: 9,
-  marginMm: 8,
-  gutterMm: 2,
+  marginMm: 5,
+  gutterMm: 0,
 };
 
 export type Rect = {
@@ -68,19 +68,21 @@ export function calculateCardPlacement(
   const gutter = mmToPoints(PRINT_LAYOUT.gutterMm);
   const usableWidth = A4_PAGE.width - margin * 2 - gutter * (PRINT_LAYOUT.columns - 1);
   const usableHeight = A4_PAGE.height - margin * 2 - gutter * (PRINT_LAYOUT.rows - 1);
-  const cellWidth = usableWidth / PRINT_LAYOUT.columns;
-  const cellHeight = usableHeight / PRINT_LAYOUT.rows;
-  const fitted = fitAspectRatio(cellWidth, cellHeight, CARD_ASPECT_RATIO);
-  const cellX = margin + column * (cellWidth + gutter);
-  const cellTopY = A4_PAGE.height - margin - row * (cellHeight + gutter);
+  const maxCardWidth = usableWidth / PRINT_LAYOUT.columns;
+  const maxCardHeight = usableHeight / PRINT_LAYOUT.rows;
+  const fitted = fitAspectRatio(maxCardWidth, maxCardHeight, CARD_ASPECT_RATIO);
+  const gridWidth = fitted.width * PRINT_LAYOUT.columns + gutter * (PRINT_LAYOUT.columns - 1);
+  const gridHeight = fitted.height * PRINT_LAYOUT.rows + gutter * (PRINT_LAYOUT.rows - 1);
+  const gridX = margin + (usableWidth - gridWidth) / 2;
+  const gridTopY = A4_PAGE.height - margin - (usableHeight - gridHeight) / 2;
 
   return {
     pageIndex,
     cardIndex,
     row,
     column,
-    x: cellX + (cellWidth - fitted.width) / 2,
-    y: cellTopY - cellHeight + (cellHeight - fitted.height) / 2,
+    x: gridX + column * (fitted.width + gutter),
+    y: gridTopY - (row + 1) * fitted.height - row * gutter,
     width: fitted.width,
     height: fitted.height,
   };

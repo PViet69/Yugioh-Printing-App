@@ -1,25 +1,57 @@
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import { A4_PAGE, calculateCardPlacement, chunkCards } from "./print-layout";
-import type { CardInstance, ExportOptions } from "./types";
-import { fetchImageBytes } from "./ygoprodeck";
+import type { CardInstance, MissingCard } from "./types";
+import { fetchImageBytes, mapWithConcurrency } from "./ygoprodeck";
 
-export async function generateDeckPdf(
-  cards: CardInstance[],
-  options: Pick<ExportOptions, "drawCutBorders">,
-): Promise<Uint8Array> {
+export type PdfExportResult = {
+  bytes: Uint8Array;
+  missingCards: MissingCard[];
+};
+
+export async function generateDeckPdf(cards: CardInstance[]): Promise<PdfExportResult> {
+  const preparedCards = await mapWithConcurrency(cards, 6, async (card) => {
+    if (!card.card) {
+      return {
+        missingCard: toMissingCard(card, card.error ?? "Card was not found in YGOPRODeck."),
+      };
+    }
+
+    try {
+      const image = await fetchImageBytes(card.card.imageUrl);
+      return {
+        drawableCard: { card, imageBytes: image.bytes, contentType: image.contentType },
+      };
+    } catch (error) {
+      return {
+        missingCard: toMissingCard(
+          card,
+          error instanceof Error ? error.message : "Failed to download card image.",
+        ),
+      };
+    }
+  });
+  const drawableCards = preparedCards.flatMap((result) =>
+    result.drawableCard ? [result.drawableCard] : [],
+  );
+  const missingCards = preparedCards.flatMap((result) =>
+    result.missingCard ? [result.missingCard] : [],
+  );
+
   const pdf = await PDFDocument.create();
-  const pages = chunkCards(cards);
+  const pages = chunkCards(drawableCards);
 
   for (const [pageIndex, pageCards] of pages.entries()) {
     const page = pdf.addPage([A4_PAGE.width, A4_PAGE.height]);
 
-    for (const [indexOnPage, card] of pageCards.entries()) {
-      if (!card.card) continue;
-
+    for (const [indexOnPage, printableCard] of pageCards.entries()) {
       const globalIndex = pageIndex * 9 + indexOnPage;
       const placement = calculateCardPlacement(globalIndex, pageIndex);
-      const { bytes, contentType } = await fetchImageBytes(card.card.imageUrl);
-      const image = await embedImage(pdf, bytes, contentType, card.card.imageUrl);
+      const image = await embedImage(
+        pdf,
+        printableCard.imageBytes,
+        printableCard.contentType,
+        printableCard.card.card?.imageUrl ?? "",
+      );
 
       page.drawImage(image, {
         x: placement.x,
@@ -27,21 +59,17 @@ export async function generateDeckPdf(
         width: placement.width,
         height: placement.height,
       });
-
-      if (options.drawCutBorders) {
-        page.drawRectangle({
-          x: placement.x,
-          y: placement.y,
-          width: placement.width,
-          height: placement.height,
-          borderColor: rgb(0.75, 0.75, 0.75),
-          borderWidth: 0.5,
-        });
-      }
     }
   }
 
-  return pdf.save();
+  if (pages.length === 0) {
+    pdf.addPage([A4_PAGE.width, A4_PAGE.height]);
+  }
+
+  return {
+    bytes: await pdf.save(),
+    missingCards,
+  };
 }
 
 async function embedImage(
@@ -58,4 +86,15 @@ async function embedImage(
   }
 
   return pdf.embedJpg(bytes);
+}
+
+function toMissingCard(card: CardInstance, reason: string): MissingCard {
+  return {
+    instanceId: card.instanceId,
+    section: card.section,
+    sectionIndex: card.sectionIndex,
+    passcode: card.passcode,
+    name: card.card?.name,
+    reason,
+  };
 }

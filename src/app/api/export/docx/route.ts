@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { ExportValidationError, resolvePrintableCards } from "@/lib/export-common";
+import { ExportValidationError, resolvePrintableCardsFromRequest } from "@/lib/export-common";
 import { exportRequestSchema } from "@/lib/export-request";
+import { MISSING_CARDS_HEADER, serializeMissingCards } from "@/lib/export-result";
 import { generateDeckDocx } from "@/lib/export-docx";
 import { YdkeParseError } from "@/lib/ydke";
 import { CardResolutionError } from "@/lib/ygoprodeck";
@@ -9,13 +10,14 @@ import { CardResolutionError } from "@/lib/ygoprodeck";
 export async function POST(request: Request) {
   try {
     const body = exportRequestSchema.parse(await request.json());
-    const cards = await resolvePrintableCards(body.input, body.options);
-    const docx = await generateDeckDocx(cards, body.options);
+    const cards = await resolvePrintableCardsFromRequest(body, body.options, body.manualCards);
+    const docx = await generateDeckDocx(cards);
 
-    return new Response(new Uint8Array(docx), {
+    return new Response(new Uint8Array(docx.bytes), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "Content-Disposition": 'attachment; filename="deck-print.docx"',
+        [MISSING_CARDS_HEADER]: serializeMissingCards(docx.missingCards),
       },
     });
   } catch (error) {

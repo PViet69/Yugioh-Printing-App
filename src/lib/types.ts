@@ -7,6 +7,12 @@ export type ParsedYdkeDeck = {
   allIds: string[];
 };
 
+export type PrintFileInput = {
+  id: string;
+  name?: string;
+  input: string;
+};
+
 export type ResolvedCard = {
   passcode: string;
   id: number;
@@ -16,6 +22,7 @@ export type ResolvedCard = {
   imageUrl: string;
   imageUrlSmall?: string;
   imageUrlCropped?: string;
+  source?: "ygoprodeck" | "manual";
 };
 
 export type CardInstance = {
@@ -25,6 +32,22 @@ export type CardInstance = {
   passcode: string;
   card?: ResolvedCard;
   error?: string;
+};
+
+export type MissingCard = {
+  instanceId: string;
+  section: DeckSection;
+  sectionIndex: number;
+  passcode: string;
+  name?: string;
+  reason: string;
+};
+
+export type ManualCardReplacement = {
+  instanceId: string;
+  passcode: string;
+  name: string;
+  imageUrl: string;
 };
 
 export type DeckResolution = {
@@ -38,12 +61,10 @@ export type ExportOptions = {
   includeMain: boolean;
   includeExtra: boolean;
   includeSide: boolean;
-  drawCutBorders: boolean;
 };
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   includeMain: true,
   includeExtra: true,
-  includeSide: false,
-  drawCutBorders: false,
+  includeSide: true,
 };

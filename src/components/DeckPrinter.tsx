@@ -1,15 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DEFAULT_EXPORT_OPTIONS, type DeckResolution, type ExportOptions } from "@/lib/types";
+import {
+  DEFAULT_EXPORT_OPTIONS,
+  type DeckResolution,
+  type ExportOptions,
+  type MissingCard,
+} from "@/lib/types";
 
 type ExportFormat = "pdf" | "docx";
 
 export function DeckPrinter() {
   const [input, setInput] = useState("");
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [resolution, setResolution] = useState<DeckResolution | null>(null);
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
   const [error, setError] = useState<string | null>(null);
+  const [exportMissingCards, setExportMissingCards] = useState<MissingCard[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
 
@@ -26,13 +33,17 @@ export function DeckPrinter() {
   async function handleFileChange(file: File | null) {
     if (!file) return;
     setInput(await file.text());
+    setUploadedFileName(file.name);
     setResolution(null);
     setError(null);
+    setExportMissingCards([]);
   }
+
 
   async function parseDeck() {
     setIsParsing(true);
     setError(null);
+    setExportMissingCards([]);
     setResolution(null);
 
     try {
@@ -58,6 +69,7 @@ export function DeckPrinter() {
   async function exportDeck(format: ExportFormat) {
     setExportingFormat(format);
     setError(null);
+    setExportMissingCards([]);
 
     try {
       const response = await fetch(`/api/export/${format}`, {
@@ -70,6 +82,9 @@ export function DeckPrinter() {
         const payload = await response.json().catch(() => ({ error: "Export failed." }));
         throw new Error(payload.error ?? "Export failed.");
       }
+
+      const missingCards = readMissingCardsHeader(response.headers.get("x-missing-cards"));
+      setExportMissingCards(missingCards);
 
       const blob = await response.blob();
       const href = URL.createObjectURL(blob);
@@ -87,7 +102,7 @@ export function DeckPrinter() {
     }
   }
 
-  const canExport = Boolean(resolution) && printableCount > 0 && resolution?.unresolved.length === 0;
+  const canExport = Boolean(resolution) && printableCount > 0;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-8">
@@ -96,7 +111,7 @@ export function DeckPrinter() {
           YDKE to print sheets
         </p>
         <h1 className="text-4xl font-bold tracking-tight text-white md:text-6xl">
-          Print Yu-Gi-Oh decks 9 cards per page.
+          Print your Yu-Gi-Oh decks.
         </h1>
         <p className="mt-5 max-w-3xl text-lg leading-8 text-slate-300">
           Upload or paste a YDKE deck link, preview the resolved YGOPRODeck card images,
@@ -107,19 +122,27 @@ export function DeckPrinter() {
       <section className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
         <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-6">
           <div className="flex flex-col gap-3">
-            <label className="text-sm font-semibold text-slate-200" htmlFor="ydke-input">
-              Paste YDKE link or file contents
-            </label>
-            <textarea
-              id="ydke-input"
-              className="min-h-48 rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm text-slate-100 outline-none transition focus:border-yellow-300"
-              placeholder="ydke://...!...!...!"
-              value={input}
-              onChange={(event) => {
-                setInput(event.target.value);
-                setResolution(null);
-              }}
-            />
+            <p className="text-sm font-semibold text-slate-200">Upload a deck file</p>
+            <div className="rounded-xl border border-slate-700 bg-slate-900 p-4 text-sm text-slate-100">
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Uploaded file</p>
+              <p className="mt-2 font-semibold text-yellow-200">
+                {uploadedFileName ?? "No file selected"}
+              </p>
+              {uploadedFileName ? (
+                <button
+                  className="mt-4 text-sm text-slate-400 underline-offset-4 transition hover:text-yellow-200 hover:underline"
+                  type="button"
+                  onClick={() => {
+                    setInput("");
+                    setUploadedFileName(null);
+                    setResolution(null);
+                    setError(null);
+                  }}
+                >
+                  Clear file
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -167,11 +190,6 @@ export function DeckPrinter() {
               checked={options.includeSide}
               onChange={(checked) => setOptions((current) => ({ ...current, includeSide: checked }))}
             />
-            <OptionCheckbox
-              label="Draw cut borders"
-              checked={options.drawCutBorders}
-              onChange={(checked) => setOptions((current) => ({ ...current, drawCutBorders: checked }))}
-            />
           </div>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
@@ -195,15 +213,39 @@ export function DeckPrinter() {
 
           <p className="mt-4 text-sm text-slate-400">
             {resolution
-              ? `${printableCount} selected cards, ${Math.max(1, Math.ceil(printableCount / 9))} page(s).`
+              ? `${printableCount} selected cards, ${Math.max(1, Math.ceil(printableCount / 9))} page(s). Missing cards are skipped during export.`
               : "Parse a deck before exporting."}
           </p>
+
+          {exportMissingCards.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-amber-300/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+              <p className="font-semibold">Export finished, but these cards were skipped:</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {exportMissingCards.map((card) => (
+                  <li key={card.instanceId}>
+                    {card.name ? `${card.name} (${card.passcode})` : card.passcode}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </section>
 
       {resolution ? <DeckPreview resolution={resolution} /> : null}
     </main>
   );
+}
+
+function readMissingCardsHeader(value: string | null): MissingCard[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    return Array.isArray(parsed) ? (parsed as MissingCard[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 function OptionCheckbox({
