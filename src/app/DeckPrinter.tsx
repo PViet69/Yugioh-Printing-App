@@ -400,6 +400,11 @@ export function DeckPrinter() {
                   ? `${deckStats.total} selected cards · ${deckStats.pages} page(s)`
                   : "Prepare a deck to unlock downloads."}
               </p>
+              {deckStats && deckStats.total % 9 !== 0 ? (
+                <p className="mt-1 text-xs leading-5 text-amber-200">
+                  {`${deckStats.pages * 9 - deckStats.total} empty slot(s)`}
+                </p>
+              ) : null}
               <p className="mt-2 text-xs leading-5 text-slate-500">
                 Missing cards will be skipped before export
               </p>

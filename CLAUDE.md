@@ -23,7 +23,8 @@ This is a Next.js App Router application for turning Yu-Gi-Oh deck inputs into p
 
 - `src/app/page.tsx` renders the client-side `DeckPrinter` UI from `src/app/DeckPrinter.tsx`.
 - The client posts deck input to `POST /api/deck/parse` for validation, parsing, YGOPRODeck resolution, and preview data.
-- The client posts the same input plus export options to `POST /api/export/pdf` or `POST /api/export/docx` to receive a downloadable file.
+- Input can be sent as legacy single input (`{ input }`) or multi-input (`{ inputs: [{ id, name?, input }] }`). Routes normalize both forms.
+- The client posts normalized deck input plus export options to `POST /api/export/pdf` or `POST /api/export/docx` to receive a downloadable file.
 - Export routes return skipped/unresolved cards in the `X-Missing-Cards` response header, serialized by `src/lib/export-result.ts`; the client decodes this header to show skipped cards.
 
 There is also `src/components/DeckPrinter.tsx`, an older/alternate client component that only supports PDF export and uses a relative `../lib/*` import style. The active page imports `src/app/DeckPrinter.tsx`.
@@ -37,10 +38,10 @@ There is also `src/components/DeckPrinter.tsx`, an older/alternate client compon
 
 ### Export pipeline
 
-- Request validation lives in `src/lib/export-request.ts` using Zod. `MAX_PRINTABLE_CARDS` is currently 120 and is enforced by both parse and export flows.
-- `src/lib/export-common.ts` centralizes export preparation: parse input, enforce card limit, resolve the deck, filter selected sections, and reject empty exports.
+- Request validation lives in `src/lib/export-request.ts` using Zod. `MAX_PRINTABLE_CARDS` is currently 360 and is enforced across normalized inputs in both parse and export flows.
+- `src/lib/export-common.ts` centralizes export preparation: normalize request inputs, enforce card limit, resolve decks, prefix per-file instance IDs, combine printable cards, and reject empty/unresolved exports.
 - `src/lib/print-layout.ts` owns the shared A4 print geometry: 3 columns × 3 rows, 9 cards per page, millimeter-to-point conversion, card placement, chunking, and section filtering.
-- `src/lib/export-pdf.ts` uses `pdf-lib`; it downloads card images, embeds PNG/JPG images, places them with `calculateCardPlacement()`, and skips unresolved or failed image downloads.
+- `src/lib/export-pdf.ts` uses `pdf-lib`; it embeds PNG/JPG images and places them with `calculateCardPlacement()`. It supports both fetched remote card images and manual `data:image/...` card images.
 - `src/lib/export-docx.ts` uses `docx`; it builds fixed A4 tables with 9 cells per page and inserts card images into each cell.
 
 ### Testing focus
@@ -59,3 +60,5 @@ When changing export behavior, prefer adding or updating tests around shared lib
 - The project uses TypeScript with `@/*` path aliases pointing at `src/*`.
 - Styling is Tailwind-style utility classes in React components plus global styles in `src/app/globals.css`.
 - External YGOPRODeck/API or image fetch failures are represented as unresolved/missing cards where possible so exports can still complete with skipped cards.
+- Manual missing-card replacements are validated as `data:image/...` payloads (not arbitrary URLs) before export.
+- The app relies on Next.js API routes (`/api/deck/parse`, `/api/export/pdf`, `/api/export/docx`); static-only hosting requires additional adaptation.
