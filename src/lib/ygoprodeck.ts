@@ -73,6 +73,10 @@ export async function resolveDeck(parsed: ParsedYdkeDeck): Promise<DeckResolutio
 export { mapWithConcurrency };
 
 export async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  if (url.startsWith("data:image/")) {
+    return decodeDataImage(url);
+  }
+
   const response = await fetch(url, {
     next: { revalidate: CARD_REVALIDATE_SECONDS },
   });
@@ -83,6 +87,24 @@ export async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array;
 
   const contentType = response.headers.get("content-type") ?? "";
   const bytes = new Uint8Array(await response.arrayBuffer());
+
+  return { bytes, contentType };
+}
+
+function decodeDataImage(dataUrl: string): { bytes: Uint8Array; contentType: string } {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+
+  if (!match) {
+    throw new CardResolutionError("Manual card image data is invalid.");
+  }
+
+  const [, contentType, base64Data] = match;
+  const binary = atob(base64Data);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
 
   return { bytes, contentType };
 }

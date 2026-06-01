@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { parseDeckInput } from "../lib/deck-input";
 import {
   DEFAULT_EXPORT_OPTIONS,
   type CardInstance,
@@ -25,8 +26,6 @@ type MissingCardGroup = {
   previewUrl?: string;
 };
 
-type PrintMode = "single" | "multi";
-
 type PrintFileDraft = {
   id: string;
   name: string;
@@ -48,66 +47,19 @@ function createPrintFile(name = "Deck 1", input = ""): PrintFileDraft {
 }
 
 export function DeckPrinter() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [printMode, setPrintMode] = useState<PrintMode>("single");
-  const [printFiles, setPrintFiles] = useState<PrintFileDraft[]>(() => [createPrintFile()]);
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [filePrintFiles, setFilePrintFiles] = useState<PrintFileDraft[]>(() => [createPrintFile()]);
+  const [ydkePrintFiles, setYdkePrintFiles] = useState<PrintFileDraft[]>(() => [createPrintFile("YDKE 1")]);
   const [lastPreparedSignature, setLastPreparedSignature] = useState<string | null>(null);
   const [deckStats, setDeckStats] = useState<DeckStats | null>(null);
   const [resolution, setResolution] = useState<DeckResolutionState | null>(null);
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_EXPORT_OPTIONS);
   const [error, setError] = useState<string | null>(null);
   const [missingCards, setMissingCards] = useState<MissingCard[]>([]);
+  const [inputMode, setInputMode] = useState<"file" | "ydke">("file");
+  const activePrintFiles = inputMode === "file" ? filePrintFiles : ydkePrintFiles;
+  const [ydkeInput, setYdkeInput] = useState("");
   const [isParsing, setIsParsing] = useState(false);
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [exportingFormat, setExportingFormat] = useState<ExportFormat | null>(null);
-
-  async function loadDeckFile(file: File | null) {
-    if (!file) return;
-
-    if (!isSupportedDeckFile(file)) {
-      setError("Please upload a .ydk, .ydke, or .txt deck file.");
-      return;
-    }
-
-    const fileText = await file.text();
-    setUploadedFileName(file.name);
-    setPrintFiles((current) => updatePrintFile(current, current[0]?.id, {
-      name: file.name,
-      input: fileText,
-      cardCount: countCardsInDeckText(fileText),
-    }));
-    setDeckStats(null);
-    setResolution(null);
-    setError(null);
-    setMissingCards([]);
-  }
-
-  function handleDrag(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
-  function handleDragEnter(event: React.DragEvent<HTMLDivElement>) {
-    handleDrag(event);
-    setIsDraggingFile(true);
-  }
-
-  function handleDragLeave(event: React.DragEvent<HTMLDivElement>) {
-    handleDrag(event);
-
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return;
-    }
-
-    setIsDraggingFile(false);
-  }
-
-  async function handleDrop(event: React.DragEvent<HTMLDivElement>) {
-    handleDrag(event);
-    setIsDraggingFile(false);
-    await loadDeckFile(event.dataTransfer.files?.[0] ?? null);
-  }
 
   async function parseDeck() {
     setIsParsing(true);
@@ -120,7 +72,7 @@ export function DeckPrinter() {
       const response = await fetch("/api/deck/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildDeckRequestBody(printMode, printFiles)),
+        body: JSON.stringify(buildDeckRequestBody(activePrintFiles))
       });
       const payload = await response.json();
 
@@ -137,7 +89,7 @@ export function DeckPrinter() {
         pages: Math.max(1, Math.ceil(selectedResolvedCards.length / 9)),
       });
       setResolution({ cards, unresolved, originalUnresolved: unresolved });
-      setLastPreparedSignature(getPrintSignature(printMode, printFiles));
+      setLastPreparedSignature(getPrintSignature(activePrintFiles));
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to parse this deck.");
     } finally {
@@ -156,7 +108,7 @@ export function DeckPrinter() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...buildDeckRequestBody(printMode, printFiles),
+          ...buildDeckRequestBody(activePrintFiles),
           options,
           manualCards,
         }),
@@ -232,16 +184,31 @@ export function DeckPrinter() {
     }
   }
 
-  function clearFile() {
-    setPrintFiles((current) => updatePrintFile(current, current[0]?.id, { name: "Deck 1", input: "", cardCount: 0 }));
-    setUploadedFileName(null);
-    setDeckStats(null);
+  function addYdkeCode() {
+    const trimmedInput = ydkeInput.trim();
+
+    if (!trimmedInput) {
+      setError("Paste a YDKE code first.");
+      return;
+    }
+
+    try {
+      parseDeckInput(trimmedInput);
+    } catch {
+      setError("YDKE code is not recognized. Please paste a valid code that starts with ydke://.");
+      return;
+    }
+
+    const nextFile = createPrintFile(`YDKE ${getActivePrintFiles(ydkePrintFiles).length + 1}`, trimmedInput);
+    setYdkePrintFiles((current) => {
+      const hasOnlyEmptyPlaceholder = current.length === 1 && current[0].input.trim().length === 0;
+      return hasOnlyEmptyPlaceholder ? [nextFile] : [...current, nextFile];
+    });
+    setYdkeInput("");
     setResolution(null);
+    setDeckStats(null);
     setError(null);
     setMissingCards([]);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
   }
 
   async function loadMultiplePrintFiles(fileList: FileList | File[] | null) {
@@ -259,7 +226,7 @@ export function DeckPrinter() {
       files.map(async (file) => createPrintFile(file.name, await file.text())),
     );
 
-    setPrintFiles((current) => {
+    setFilePrintFiles((current) => {
       const hasOnlyEmptyPlaceholder = current.length === 1 && current[0].input.trim().length === 0;
       return hasOnlyEmptyPlaceholder ? loadedFiles : [...current, ...loadedFiles];
     });
@@ -271,14 +238,18 @@ export function DeckPrinter() {
 
 
   function removePrintFile(id: string) {
-    setPrintFiles((current) => current.filter((file) => file.id !== id));
+    if (inputMode === "file") {
+      setFilePrintFiles((current) => current.filter((file) => file.id !== id));
+    } else {
+      setYdkePrintFiles((current) => current.filter((file) => file.id !== id));
+    }
     setResolution(null);
     setDeckStats(null);
   }
 
-  const currentPrintSignature = getPrintSignature(printMode, printFiles);
+  const currentPrintSignature = getPrintSignature(activePrintFiles);
   const isPreparedCurrent = resolution !== null && lastPreparedSignature === currentPrintSignature;
-  const hasPrintableInput = getActivePrintFiles(printMode, printFiles).length > 0;
+  const hasPrintableInput = getActivePrintFiles(activePrintFiles).length > 0;
   const unresolvedSelectedCount = resolution
     ? filterSelectedCards(resolution.unresolved, options).length
     : 0;
@@ -288,141 +259,93 @@ export function DeckPrinter() {
   return (
     <main className="min-h-dvh overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(22,163,74,0.22),transparent_28rem),radial-gradient(circle_at_top_right,rgba(217,119,6,0.18),transparent_24rem),linear-gradient(135deg,#0f172a_0%,#111827_48%,#052e1a_100%)] px-4 py-6 text-white sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <section className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.07] p-6 shadow-2xl shadow-black/30 backdrop-blur md:p-10">
-          <div className="absolute -right-16 -top-16 h-48 w-48 rounded-full bg-yellow-300/20 blur-3xl" />
-          <div className="absolute -bottom-20 -left-16 h-52 w-52 rounded-full bg-emerald-400/20 blur-3xl" />
-
-          <div className="relative grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-            <div>
-              <h1 className="max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
-                Yu-Gi-Oh Printing.
-              </h1>
-              <p className="mt-5 max-w-2xl text-base leading-8 text-slate-200 sm:text-lg">
-                Upload a deck file, prepare the card list, then download a PDF arranged as 9 cards per page.
-              </p>
-            </div>
-
-          
-          </div>
-        </section>
+     
 
         <section className="grid gap-6 lg:grid-cols-[1fr_380px]">
           <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.07] p-5 shadow-xl shadow-black/20 backdrop-blur md:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-200">Step 1</p>
-                <h2 className="mt-2 text-2xl font-bold text-white">Upload your deck</h2>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  Supports .ydk, .ydke, and .txt files. Drag a file here or choose one from your device.
-                </p>
-              </div>
-              <div className="hidden h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/15 text-emerald-200 sm:flex">
-                <FileIcon />
-              </div>
+            <div className="text-center">
+              <h1 className="mx-auto max-w-3xl text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl">
+                Yu-Gi-Oh Card Printing
+              </h1>
+              <p className="mt-3 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-200">Step 1</p>
+              <h2 className="mt-2 text-2xl font-bold text-white">Upload your deck</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-300">
+                Supports .ydk, .ydke, and .txt files. Drag a file here or choose one from your device.
+              </p>
             </div>
 
-            <div className="mt-5 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-950/45 p-1 text-sm font-bold">
-              <button
-                className={`rounded-xl px-4 py-3 transition ${printMode === "single" ? "bg-yellow-300 text-slate-950" : "text-slate-300 hover:text-yellow-100"}`}
-                type="button"
-                onClick={() => setPrintMode("single")}
-              >
-                Single file print
-              </button>
-              <button
-                className={`rounded-xl px-4 py-3 transition ${printMode === "multi" ? "bg-yellow-300 text-slate-950" : "text-slate-300 hover:text-yellow-100"}`}
-                type="button"
-                onClick={() => setPrintMode("multi")}
-              >
-                Multi-file print
-              </button>
-            </div>
-
-            {printMode === "single" ? (
-              <div
-                className={`mt-6 rounded-3xl border border-dashed p-5 transition ${
-                  isDraggingFile
-                    ? "border-yellow-300 bg-yellow-300/10 ring-4 ring-yellow-300/20"
-                    : "border-emerald-300/35 bg-slate-950/55"
-                }`}
-                onDragEnter={handleDragEnter}
-                onDragOver={handleDrag}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <input
-                  ref={fileInputRef}
-                  className="sr-only"
-                  id="deck-file-upload"
-                  type="file"
-                  accept=".ydk,.ydke,.txt,text/plain"
-                  onChange={(event) => loadDeckFile(event.target.files?.[0] ?? null)}
-                />
-                <label
-                  className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] p-5 text-center transition hover:border-yellow-300 hover:bg-white/[0.09] focus-within:border-yellow-300 focus-within:ring-4 focus-within:ring-yellow-300/20"
-                  htmlFor="deck-file-upload"
+            <div className="mt-6 grid gap-4">
+              <div className="relative z-[100] grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-950/45 p-1 text-sm font-bold pointer-events-auto">
+                <button
+                  className={`rounded-xl px-4 py-3 transition ${inputMode === "file" ? "bg-yellow-300 text-slate-950" : "text-slate-300 hover:text-yellow-100"}`}
+                  type="button"
+                  onClick={() => setInputMode("file")}
                 >
-                  <span className="text-base font-bold text-yellow-100">
-                    {isDraggingFile ? "Drop deck file here" : "Upload or drop .ydk/.ydke/.txt"}
-                  </span>
-                  <span className="mt-2 break-all text-sm text-slate-300">
-                    {uploadedFileName ? `Selected: ${uploadedFileName}` : "Click to choose a file, or drag it into this area."}
-                  </span>
-                  {printFiles[0]?.input.trim() ? (
-                    <span className="mt-3 rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-bold text-emerald-100">
-                      {printFiles[0].cardCount} cards
-                    </span>
-                  ) : null}
-                </label>
-
-                {uploadedFileName ? (
-                  <div className="mt-4 flex justify-center">
-                    <button
-                      className="min-h-11 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-yellow-300 hover:text-yellow-200 focus:outline-none focus:ring-4 focus:ring-yellow-300/20"
-                      type="button"
-                      onClick={clearFile}
-                    >
-                      Clear file
-                    </button>
-                  </div>
-                ) : null}
+                  Upload file
+                </button>
+                <button
+                  className={`rounded-xl px-4 py-3 transition ${inputMode === "ydke" ? "bg-yellow-300 text-slate-950" : "text-slate-300 hover:text-yellow-100"}`}
+                  type="button"
+                  onClick={() => setInputMode("ydke")}
+                >
+                  YDKE code
+                </button>
               </div>
-            ) : (
-              <div className="mt-6 grid gap-4">
+
+              {inputMode === "file" ? (
                 <MultiFileDropZone onLoadFiles={loadMultiplePrintFiles} />
+              ) : (
                 <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-                  <p className="text-sm font-bold text-yellow-100">Print file list</p>
-                  <div className="mt-3 grid gap-2">
-                    {getActivePrintFiles("multi", printFiles).length > 0 ? (
-                      getActivePrintFiles("multi", printFiles).map((file, index) => (
-                        <div
-                          className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm"
-                          key={file.id}
+                  <p className="text-sm font-bold text-yellow-100">Paste YDKE code</p>
+                  <textarea
+                    className="mt-3 min-h-28 w-full resize-y rounded-2xl border border-white/10 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-yellow-300 focus:ring-4 focus:ring-yellow-300/20"
+                    placeholder="ydke://...!...!...!"
+                    value={ydkeInput}
+                    onChange={(event) => setYdkeInput(event.target.value)}
+                  />
+                  <button
+                    className="mt-3 min-h-10 rounded-xl bg-yellow-300 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-yellow-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    disabled={ydkeInput.trim().length === 0}
+                    onClick={addYdkeCode}
+                  >
+                    Add YDKE code
+                  </button>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+                <p className="text-sm font-bold text-yellow-100">Print file list</p>
+                <div className="mt-3 grid gap-2">
+                  {getActivePrintFiles(activePrintFiles).length > 0 ? (
+                    getActivePrintFiles(activePrintFiles).map((file, index) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-sm"
+                        key={file.id}
+                      >
+                        <span className="min-w-0 flex-1 break-all text-slate-200">
+                          {index + 1}. {file.name}
+                        </span>
+                        <span className="shrink-0 rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-bold text-emerald-100">
+                          {file.cardCount} cards
+                        </span>
+                        <button
+                          className="rounded-lg border border-white/10 px-3 py-1 text-xs font-bold text-slate-300 transition hover:border-rose-300 hover:text-rose-100"
+                          type="button"
+                          onClick={() => removePrintFile(file.id)}
                         >
-                          <span className="min-w-0 flex-1 break-all text-slate-200">
-                            {index + 1}. {file.name}
-                          </span>
-                          <span className="shrink-0 rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-bold text-emerald-100">
-                            {file.cardCount} cards
-                          </span>
-                          <button
-                            className="rounded-lg border border-white/10 px-3 py-1 text-xs font-bold text-slate-300 transition hover:border-rose-300 hover:text-rose-100"
-                            type="button"
-                            onClick={() => removePrintFile(file.id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-sm text-slate-400">
-                        No files added yet. Drop multiple deck files above.
-                      </p>
-                    )}
-                  </div>
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-white/10 px-3 py-4 text-center text-sm text-slate-400">
+                      No files added yet. Drop multiple deck files above.
+                    </p>
+                  )}
                 </div>
               </div>
-            )}
+            </div>
 
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
@@ -543,7 +466,7 @@ function MultiFileDropZone({ onLoadFiles }: { onLoadFiles: (files: FileList | nu
   }
 
   return (
-    <div>
+    <div className="relative z-0">
       <input
         className="sr-only"
         id={inputId}
@@ -567,9 +490,7 @@ function MultiFileDropZone({ onLoadFiles }: { onLoadFiles: (files: FileList | nu
         <span className="text-base font-bold text-yellow-100">
           {isDragging ? "Drop deck files here" : "Upload or drop multiple deck files"}
         </span>
-        <span className="mt-2 text-sm text-slate-300">
-          Files are added immediately to the print list below.
-        </span>
+      
       </label>
     </div>
   );
@@ -716,23 +637,7 @@ function MissingCardForm({
   );
 }
 
-function FeatureItem({ title, text }: { title: string; text: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.06] p-4">
-      <p className="font-semibold text-white">{title}</p>
-      <p className="mt-1 leading-6 text-slate-300">{text}</p>
-    </div>
-  );
-}
 
-function FileIcon() {
-  return (
-    <svg aria-hidden="true" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 3.75h6.4L18 8.35v11.9H7a1.5 1.5 0 0 1-1.5-1.5V5.25A1.5 1.5 0 0 1 7 3.75Z" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13.25 4v4.6h4.6M8.75 13h6.5M8.75 16h4.25" />
-    </svg>
-  );
-}
 
 function readMissingCardsHeader(value: string | null): MissingCard[] {
   if (!value) return [];
@@ -811,10 +716,14 @@ function readFileAsDataUrl(file: File): Promise<string> {
 }
 
 function countCardsInDeckText(input: string): number {
-  return input
-    .split(/\r?\n/g)
-    .map((line) => line.trim())
-    .filter((line) => /^\d+$/.test(line)).length;
+  try {
+    return parseDeckInput(input).allIds.length;
+  } catch {
+    return input
+      .split(/\r?\n/g)
+      .map((line) => line.trim())
+      .filter((line) => /^\d+$/.test(line)).length;
+  }
 }
 
 function groupMissingCards(
@@ -851,38 +760,21 @@ function getManualPreviewByPasscode(cards: CardInstance[]): Map<string, string> 
   return previews;
 }
 
-function updatePrintFile(
-  files: PrintFileDraft[],
-  fileId: string | undefined,
-  changes: Partial<PrintFileDraft>,
-): PrintFileDraft[] {
-  if (!fileId) return files;
-  return files.map((file) => (file.id === fileId ? { ...file, ...changes } : file));
+function getActivePrintFiles(printFiles: PrintFileDraft[]): PrintFileDraft[] {
+  return printFiles.filter((file) => file.input.trim().length > 0);
 }
 
-function getActivePrintFiles(printMode: PrintMode, printFiles: PrintFileDraft[]): PrintFileDraft[] {
-  const files = printMode === "single" ? printFiles.slice(0, 1) : printFiles;
-  return files.filter((file) => file.input.trim().length > 0);
-}
-
-function buildDeckRequestBody(printMode: PrintMode, printFiles: PrintFileDraft[]) {
-  const activeFiles = getActivePrintFiles(printMode, printFiles);
-
-  if (printMode === "single") {
-    return { input: activeFiles[0]?.input ?? "" };
-  }
+function buildDeckRequestBody(printFiles: PrintFileDraft[]) {
+  const activeFiles = getActivePrintFiles(printFiles);
 
   return {
     inputs: activeFiles.map(({ id, name, input }) => ({ id, name, input })),
   };
 }
 
-function getPrintSignature(printMode: PrintMode, printFiles: PrintFileDraft[]): string {
-  const files = printMode === "single" ? printFiles.slice(0, 1) : printFiles;
-
+function getPrintSignature(printFiles: PrintFileDraft[]): string {
   return JSON.stringify({
-    mode: printMode,
-    files: files.map(({ id, name, input }) => ({
+    files: printFiles.map(({ id, name, input }) => ({
       id,
       name,
       input: input.trim(),

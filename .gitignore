@@ -3,6 +3,10 @@
 /.pnp
 .pnp.*
 
+#vscode
+/.claude
+CLAUDE.md
+
 # testing
 /coverage
 
@@ -32,3 +36,5 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+

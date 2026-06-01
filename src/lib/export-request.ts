@@ -30,7 +30,7 @@ export const manualCardReplacementSchema = z.object({
   passcode: z.string().trim().min(1),
   name: z.string().trim().min(1),
   imageUrl: z.string().trim().refine(
-    (value) => value.startsWith("data:image/") || z.string().url().safeParse(value).success,
+    (value) => value.startsWith("data:image/"),
     "Upload a valid card image.",
   ),
 });
