@@ -6,7 +6,11 @@ export const A4_PAGE = {
   height: 841.89,
 };
 
-export const CARD_ASPECT_RATIO = 421 / 614;
+export const CARD_ASPECT_RATIO = 59 / 86;
+
+// Default physical card size (mm). Use these to compute exact card placement.
+export const CARD_WIDTH_MM = 60;
+export const CARD_HEIGHT_MM = 87;
 
 export const PRINT_LAYOUT = {
   columns: 3,
@@ -70,7 +74,19 @@ export function calculateCardPlacement(
   const usableHeight = A4_PAGE.height - margin * 2 - gutter * (PRINT_LAYOUT.rows - 1);
   const maxCardWidth = usableWidth / PRINT_LAYOUT.columns;
   const maxCardHeight = usableHeight / PRINT_LAYOUT.rows;
-  const fitted = fitAspectRatio(maxCardWidth, maxCardHeight, CARD_ASPECT_RATIO);
+
+  // Preferred fixed card size in points (converted from mm).
+  const preferredWidth = mmToPoints(CARD_WIDTH_MM);
+  const preferredHeight = mmToPoints(CARD_HEIGHT_MM);
+
+  // If preferred size fits within the grid cell, use it. Otherwise scale down
+  // proportionally to fit within maxCardWidth/maxCardHeight.
+  let fitted = { width: preferredWidth, height: preferredHeight };
+
+  if (preferredWidth > maxCardWidth || preferredHeight > maxCardHeight) {
+    const scale = Math.min(maxCardWidth / preferredWidth, maxCardHeight / preferredHeight);
+    fitted = { width: preferredWidth * scale, height: preferredHeight * scale };
+  }
   const gridWidth = fitted.width * PRINT_LAYOUT.columns + gutter * (PRINT_LAYOUT.columns - 1);
   const gridHeight = fitted.height * PRINT_LAYOUT.rows + gutter * (PRINT_LAYOUT.rows - 1);
   const gridX = margin + (usableWidth - gridWidth) / 2;

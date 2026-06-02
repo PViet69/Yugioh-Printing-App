@@ -5,7 +5,7 @@ const isGithubPages = process.env.GITHUB_ACTIONS === "true";
 
 const nextConfig = {
 
-  allowedDevOrigins: ["192.168.1.5", "172.17.0.1"],
+  allowedDevOrigins: ["192.168.1.5", "172.17.0.1", "192.168.1.58"],
 
   images: {
     remotePatterns: [
